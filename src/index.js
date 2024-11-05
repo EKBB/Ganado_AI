@@ -7,16 +7,11 @@ import {
   createBrowserRouter,
   RouterProvider,
 } from "react-router-dom";
-import PredictiveModel from './Behavior';
 
 const router = createBrowserRouter([
   {
     path: "/",
     element: <App></App>
-  },
-  {
-    path: "/p",
-    element: <PredictiveModel></PredictiveModel>
   },
 ]);
 
