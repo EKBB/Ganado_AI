@@ -5,7 +5,7 @@ import * as Papa from 'papaparse';
 const GanadoPredictivo = () => {
     const [predicciones, setPredicciones] = useState([]);
 
-    // Función para cargar y preprocesar los datos de entrenamiento
+    // Función para cargar y normalizar los datos
     const loadData = async (filePath) => {
         const response = await fetch(filePath);
         const data = await response.text();
@@ -19,47 +19,56 @@ const GanadoPredictivo = () => {
             const lat = parseFloat(row.Latitud);
             const long = parseFloat(row.Longitud);
             const velocidad = parseFloat(row.Velocidad);
-            const comportamiento = row.Comportamiento === 'Normal' ? 0 : 1;
 
-            inputs.push([lat, long, velocidad]);
-            labels.push([comportamiento]);
+            if (!isNaN(lat) && !isNaN(long) && !isNaN(velocidad)) {
+                // Normalizar las entradas dividiendo por el máximo esperado (ajuste según sea necesario)
+                inputs.push([(lat + 90) / 180, (long + 180) / 360, velocidad / 10]);
+
+                if (row.Comportamiento !== undefined) {
+                    const comportamiento = row.Comportamiento === 'Normal' ? 0 : 1;
+                    labels.push(comportamiento); // Asegúrate de que labels sea un array plano
+                }
+            }
         });
 
         return {
             inputs: tf.tensor2d(inputs),
-            labels: tf.tensor2d(labels),
+            labels: labels.length > 0 ? tf.tensor2d(labels, [labels.length, 1]) : null, // Especificar la forma de los labels
         };
     };
 
-    // Función para crear y entrenar el modelo
     const createAndTrainModel = async () => {
-        const { inputs, labels } = await loadData('/comportamiento_ganado_simulado.csv'); // Ruta del archivo CSV de entrenamiento
+        const { inputs, labels } = await loadData('/comportamiento_ganado_simulado.csv');
         const model = await createModel();
-        await trainModel(model, inputs, labels);
-        
-        // Después de entrenar, cargar los datos de prueba y hacer predicciones
-        const { inputs: testInputs } = await loadData('/comportamiento_ganado_simulado_prueba.csv'); // Ruta del archivo CSV de prueba
+
+        if (labels) {
+            await trainModel(model, inputs, labels);
+        }
+
+        // Cargar los datos de prueba y hacer predicciones
+        const { inputs: testInputs } = await loadData('/comportamiento_ganado_simulado_prueba.csv');
         makePredictions(model, testInputs);
     };
 
     const createModel = async () => {
         const model = tf.sequential();
-        model.add(tf.layers.dense({ units: 10, activation: 'relu', inputShape: [3] }));
+        model.add(tf.layers.dense({ units: 16, activation: 'relu', inputShape: [3] }));
+        model.add(tf.layers.dense({ units: 8, activation: 'relu' }));
         model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
 
-        model.compile({ optimizer: 'adam', loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+        model.compile({ optimizer: tf.train.adam(0.001), loss: 'binaryCrossentropy', metrics: ['accuracy'] });
 
         return model;
     };
 
     const trainModel = async (model, inputs, labels) => {
         await model.fit(inputs, labels, {
-            epochs: 100,
+            epochs: 200,
             batchSize: 32,
             validationSplit: 0.2,
             callbacks: {
                 onEpochEnd: (epoch, logs) => {
-                    console.log(`Epoch: ${epoch}, Loss: ${logs.loss}, Accuracy: ${logs.acc}`);
+                    console.log(`Epoch: ${epoch}, Loss: ${logs.loss.toFixed(4)}, Accuracy: ${logs.acc.toFixed(4)}`);
                 },
             },
         });
@@ -69,7 +78,6 @@ const GanadoPredictivo = () => {
         const prediccionesTensor = model.predict(inputs);
         const prediccionesArray = await prediccionesTensor.array();
 
-        // Convertir las predicciones a etiquetas
         const resultados = prediccionesArray.map(pred => (pred[0] > 0.5 ? 'Desviado' : 'Normal'));
         setPredicciones(resultados);
     };
